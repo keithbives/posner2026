@@ -278,7 +278,7 @@
                 ${badgeHTML}
                 <label for="${item.id}">
                     <span>${item.name} ($${item.price.toLocaleString()}${item.period})</span>
-                    <span id="${item.id}-val">${(item.max - existing)} + 0 / ${item.max}</span>
+                    <span id="${item.id}-val">${(item.max - existing)} + 0 of ${item.max}</span>
                 </label>
                 <div class="commit-text">
                     Max: <strong id="${item.id}-max">${item.max === 100 ? 'Unlimited' : item.max}</strong> | 
@@ -457,10 +457,10 @@
                 // Available after = max - totalOccupied
                 const availableAfter = (item.max === 100) ? 'Unlimited' : Math.max(0, item.max - totalOccupied);
 
-                // Update displayed slider count to show "Existing + Committed / Max"
+                // Update displayed slider count to show "Existing + Committed of Max"
                 const valEl = document.getElementById(`${item.id}-val`);
                 if (valEl) {
-                    valEl.innerText = `${existing} + ${newCommitted} / ${item.max === 100 ? 'Unlimited' : item.max}`;
+                    valEl.innerText = `${existing} + ${newCommitted} of ${item.max === 100 ? 'Unlimited' : item.max}`;
                 }
 
                 // Update displayed numbers
