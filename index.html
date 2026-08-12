@@ -92,6 +92,7 @@
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         position: relative; 
+        transition: background-color 0.2s ease, transform 0.15s ease;
     }
     
     #fundraising-calculator .slider-group.highlight {
@@ -100,6 +101,17 @@
         transform: scale(1.02);
         z-index: 10;
     }
+
+    /* NEW: Sold out styling */
+    #fundraising-calculator .slider-group.sold-out {
+        background-color: #e8f5e9;
+        border: 1px solid #4caf50;
+        color: #2e7d32;
+    }
+    #fundraising-calculator .slider-group.sold-out .highlight-badge {
+        background-color: #4caf50;
+    }
+
     .highlight-badge {
         position: absolute;
         top: -12px;
@@ -200,26 +212,25 @@
             }
             
             group.className = `slider-group ${highlightClass}`;
+            group.id = `${item.id}-group`;
 
-            // Compute available before any new commitments
+            // For the new behavior the slider represents TOTAL occupied (existing + new)
             const existing = item.existing || 0;
-            const availableBefore = item.max === 100 ? 'Unlimited' : (item.max - existing);
-            // For compatibility with existing "Unlimited" sentinel, keep slider max at 100 when max===100
-            const sliderMax = item.max === 100 ? 100 : Math.max(0, item.max - existing);
-            
+            const sliderMax = item.max === 100 ? 100 : item.max; // keep Unlimited sentinel
+
             group.innerHTML = `
                 ${badgeHTML}
                 <label for="${item.id}">
                     <span>${item.name} ($${item.price.toLocaleString()}${item.period})</span>
-                    <span id="${item.id}-val">0</span>
+                    <span id="${item.id}-val">${existing}</span>
                 </label>
                 <div class="commit-text">
                     Max: <strong id="${item.id}-max">${item.max === 100 ? 'Unlimited' : item.max}</strong> | 
                     Existing: <strong id="${item.id}-existing">${existing}</strong> | 
-                    Available: <strong id="${item.id}-avail">${availableBefore}</strong> | 
+                    Available: <strong id="${item.id}-avail">${item.max === 100 ? 'Unlimited' : (item.max - existing)}</strong> | 
                     Committed (new): <strong id="${item.id}-commit">0</strong>
                 </div>
-                <input type="range" id="${item.id}" min="0" max="${sliderMax}" value="0">
+                <input type="range" id="${item.id}" min="0" max="${sliderMax}" value="${existing}">
             `;
             container.appendChild(group);
 
@@ -231,30 +242,65 @@
             let currentAnnualTotal = 0;
             let currentMonthlyTotal = 0;
 
+            // Read current slider values (TOTAL occupied per item)
+            const totals = {};
             items.forEach(item => {
                 const slider = document.getElementById(item.id);
-                const currentValue = parseInt(slider.value) || 0; // new commitments
-                const existing = item.existing || 0; // already rented - do NOT count toward goal
+                totals[item.id] = Math.max(0, parseInt(slider.value) || 0);
+            });
 
-                document.getElementById(`${item.id}-val`).innerText = currentValue;
+            // Enforce mutual exclusivity between suite and 270desk:
+            const suiteItem = items.find(i => i.id === 'suite');
+            const d270Item = items.find(i => i.id === '270desk');
+            if (suiteItem && d270Item) {
+                const suiteExisting = suiteItem.existing || 0;
+                const d270Existing = d270Item.existing || 0;
+
+                // If suite has been moved above existing (i.e. someone turned it "on"), clear 270desk new commitments
+                if (totals['suite'] > suiteExisting) {
+                    totals['270desk'] = d270Existing; // set TOTAL occupied back to existing -> new commits = 0
+                    document.getElementById('270desk').value = d270Existing;
+                }
+                // If 270desk has new commitments, clear suite new commitments
+                if (totals['270desk'] > d270Existing) {
+                    totals['suite'] = suiteExisting;
+                    document.getElementById('suite').value = suiteExisting;
+                }
+            }
+
+            // Now apply calculations and update UI using the (possibly adjusted) totals
+            items.forEach(item => {
+                const totalOccupied = totals[item.id];
+                const existing = item.existing || 0;
+                const newCommitted = Math.max(0, totalOccupied - existing);
+
+                // Update displayed slider total value
+                document.getElementById(`${item.id}-val`).innerText = totalOccupied;
 
                 // Update displayed numbers
                 if (item.max === 100) {
-                    // Keep Unlimited semantics
                     document.getElementById(`${item.id}-avail`).innerText = 'Unlimited';
                     document.getElementById(`${item.id}-max`).innerText = 'Unlimited';
                 } else {
-                    const availableAfter = item.max - existing - currentValue;
-                    document.getElementById(`${item.id}-avail`).innerText = availableAfter;
+                    const availableAfter = item.max - totalOccupied;
+                    document.getElementById(`${item.id}-avail`).innerText = availableAfter >= 0 ? availableAfter : 0;
                     document.getElementById(`${item.id}-max`).innerText = item.max;
                 }
 
                 document.getElementById(`${item.id}-existing`).innerText = existing;
-                document.getElementById(`${item.id}-commit`).innerText = currentValue;
+                document.getElementById(`${item.id}-commit`).innerText = newCommitted;
+
+                // Mark the product block sold-out (green) when totalOccupied >= max (for finite max)
+                const groupEl = document.getElementById(`${item.id}-group`);
+                if (item.max !== 100 && totalOccupied >= item.max) {
+                    groupEl.classList.add('sold-out');
+                } else {
+                    groupEl.classList.remove('sold-out');
+                }
 
                 // Only new commitments contribute to the fundraising goal
-                let baseContribution = currentValue * item.price;
-                
+                let baseContribution = newCommitted * item.price;
+
                 if (item.period === '/month') {
                     currentMonthlyTotal += baseContribution;
                     currentAnnualTotal += (baseContribution * 12);
@@ -262,6 +308,10 @@
                     currentAnnualTotal += baseContribution;
                     currentMonthlyTotal += (baseContribution / 12);
                 }
+
+                // Ensure the actual slider value in DOM matches the totals map (in case we adjusted it above)
+                const sliderEl = document.getElementById(item.id);
+                if (parseInt(sliderEl.value) !== totalOccupied) sliderEl.value = totalOccupied;
             });
 
             totalAnnualDisplay.innerText = currentAnnualTotal.toLocaleString(undefined, { maximumFractionDigits: 0 });
