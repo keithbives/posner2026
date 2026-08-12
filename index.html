@@ -457,10 +457,10 @@
                 // Available after = max - totalOccupied
                 const availableAfter = (item.max === 100) ? 'Unlimited' : Math.max(0, item.max - totalOccupied);
 
-                // Update displayed slider count to show "Available + Committed / Max"
+                // Update displayed slider count to show "Existing + Committed / Max"
                 const valEl = document.getElementById(`${item.id}-val`);
                 if (valEl) {
-                    valEl.innerText = `${availableAfter} + ${newCommitted} / ${item.max === 100 ? 'Unlimited' : item.max}`;
+                    valEl.innerText = `${existing} + ${newCommitted} / ${item.max === 100 ? 'Unlimited' : item.max}`;
                 }
 
                 // Update displayed numbers
