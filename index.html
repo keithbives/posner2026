@@ -166,16 +166,18 @@
     document.addEventListener("DOMContentLoaded", function() {
         const targetGoal = 150000;
 
+        // Note: add `existing` to indicate number already rented/committed (these do NOT count toward new goal total)
+        // Set existing values to the current already-rented numbers; default is 0.
         const items = [
-            { id: 'indiv', name: 'Individual Community Member', price: 200, period: '/year', max: 100, committed: 0 },
-            { id: 'nonprofit', name: 'Non-profit Community Member', price: 450, period: '/year', max: 100, committed: 0 },
-            { id: 'forprofit', name: 'For-Profit Community Member', price: 700, period: '/year', max: 100, committed: 0 },
-            { id: 'hotdesk', name: 'Hot Desk Member', price: 100, period: '/month', max: 50, committed: 0 },
-            { id: 'desk', name: 'Dedicated Desk Tenant', price: 350, period: '/month', max: 17, committed: 0 },
-            { id: '270desk', name: 'STE 270 Dedicated Desk Tenant', price: 350, period: '/month', max: 50, committed: 0 },
-            { id: 'small', name: 'Small Office Tenant', price: 1000, period: '/month', max: 3, committed: 0 },
-            { id: 'medium', name: 'Medium Office Tenant', price: 1500, period: '/month', max: 2, committed: 0 },
-            { id: 'suite', name: 'Suite 270 Tenancy', price: 15000, period: '/month', max: 1, committed: 0 }
+            { id: 'indiv', name: 'Individual Community Member', price: 200, period: '/year', max: 100, existing: 0 },
+            { id: 'nonprofit', name: 'Non-profit Community Member', price: 450, period: '/year', max: 100, existing: 0 },
+            { id: 'forprofit', name: 'For-Profit Community Member', price: 700, period: '/year', max: 100, existing: 0 },
+            { id: 'hotdesk', name: 'Hot Desk Member', price: 100, period: '/month', max: 50, existing: 0 },
+            { id: 'desk', name: 'Dedicated Desk Tenant', price: 350, period: '/month', max: 17, existing: 0 },
+            { id: '270desk', name: 'STE 270 Dedicated Desk Tenant', price: 350, period: '/month', max: 50, existing: 0 },
+            { id: 'small', name: 'Small Office Tenant', price: 1000, period: '/month', max: 3, existing: 0 },
+            { id: 'medium', name: 'Medium Office Tenant', price: 1500, period: '/month', max: 2, existing: 0 },
+            { id: 'suite', name: 'Suite 270 Tenancy', price: 15000, period: '/month', max: 1, existing: 0 }
         ];
 
         const container = document.getElementById('sliders-container');
@@ -198,18 +200,26 @@
             }
             
             group.className = `slider-group ${highlightClass}`;
+
+            // Compute available before any new commitments
+            const existing = item.existing || 0;
+            const availableBefore = item.max === 100 ? 'Unlimited' : (item.max - existing);
+            // For compatibility with existing "Unlimited" sentinel, keep slider max at 100 when max===100
+            const sliderMax = item.max === 100 ? 100 : Math.max(0, item.max - existing);
             
             group.innerHTML = `
                 ${badgeHTML}
                 <label for="${item.id}">
                     <span>${item.name} ($${item.price.toLocaleString()}${item.period})</span>
-                    <span id="${item.id}-val">${item.committed}</span>
+                    <span id="${item.id}-val">0</span>
                 </label>
                 <div class="commit-text">
-                    Available: <strong id="${item.id}-avail"></strong> | 
-                    Committed: <strong id="${item.id}-commit"></strong>
+                    Max: <strong id="${item.id}-max">${item.max === 100 ? 'Unlimited' : item.max}</strong> | 
+                    Existing: <strong id="${item.id}-existing">${existing}</strong> | 
+                    Available: <strong id="${item.id}-avail">${availableBefore}</strong> | 
+                    Committed (new): <strong id="${item.id}-commit">0</strong>
                 </div>
-                <input type="range" id="${item.id}" min="${item.committed}" max="${item.max}" value="${item.committed}">
+                <input type="range" id="${item.id}" min="0" max="${sliderMax}" value="0">
             `;
             container.appendChild(group);
 
@@ -223,14 +233,26 @@
 
             items.forEach(item => {
                 const slider = document.getElementById(item.id);
-                const currentValue = parseInt(slider.value);
-                
+                const currentValue = parseInt(slider.value) || 0; // new commitments
+                const existing = item.existing || 0; // already rented - do NOT count toward goal
+
                 document.getElementById(`${item.id}-val`).innerText = currentValue;
-                
-                let availableText = item.max === 100 ? 'Unlimited' : (item.max - currentValue);
-                document.getElementById(`${item.id}-avail`).innerText = availableText;
+
+                // Update displayed numbers
+                if (item.max === 100) {
+                    // Keep Unlimited semantics
+                    document.getElementById(`${item.id}-avail`).innerText = 'Unlimited';
+                    document.getElementById(`${item.id}-max`).innerText = 'Unlimited';
+                } else {
+                    const availableAfter = item.max - existing - currentValue;
+                    document.getElementById(`${item.id}-avail`).innerText = availableAfter;
+                    document.getElementById(`${item.id}-max`).innerText = item.max;
+                }
+
+                document.getElementById(`${item.id}-existing`).innerText = existing;
                 document.getElementById(`${item.id}-commit`).innerText = currentValue;
 
+                // Only new commitments contribute to the fundraising goal
                 let baseContribution = currentValue * item.price;
                 
                 if (item.period === '/month') {
@@ -254,6 +276,9 @@
             // NEW: Calculate percentage and update both the bar width and the text
             let rawPercentage = (currentAnnualTotal / targetGoal) * 100;
             
+            // Avoid NaN or -Infinity when targetGoal is zero
+            if (!isFinite(rawPercentage) || isNaN(rawPercentage)) rawPercentage = 0;
+
             // Format the text to show the actual percentage without decimals
             progressText.innerText = Math.round(rawPercentage) + '%';
             
