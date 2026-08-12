@@ -92,7 +92,7 @@
         border-radius: 8px;
         box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         position: relative; 
-        transition: background-color 0.2s ease, transform 0.15s ease;
+        transition: background-color 0.2s ease, transform 0.15s ease, opacity 0.2s ease;
     }
     
     #fundraising-calculator .slider-group.highlight {
@@ -110,6 +110,12 @@
     }
     #fundraising-calculator .slider-group.sold-out .highlight-badge {
         background-color: #4caf50;
+    }
+
+    /* NEW: Disabled/greyed styling for mutually exclusive blocks */
+    #fundraising-calculator .slider-group.disabled {
+        opacity: 0.5;
+        pointer-events: none;
     }
 
     .highlight-badge {
@@ -178,26 +184,37 @@
     document.addEventListener("DOMContentLoaded", function() {
         const targetGoal = 150000;
 
-        // Note: add `existing` to indicate number already rented/committed (these do NOT count toward new goal total)
-        // Set existing values to the current already-rented numbers; default is 0.
-        const items = [
-            { id: 'indiv', name: 'Individual Community Member', price: 200, period: '/year', max: 100, existing: 0 },
-            { id: 'nonprofit', name: 'Non-profit Community Member', price: 450, period: '/year', max: 100, existing: 0 },
-            { id: 'forprofit', name: 'For-Profit Community Member', price: 700, period: '/year', max: 100, existing: 0 },
-            { id: 'hotdesk', name: 'Hot Desk Member', price: 100, period: '/month', max: 50, existing: 0 },
-            { id: 'desk', name: 'Dedicated Desk Tenant', price: 350, period: '/month', max: 30, existing: 13 },
-            { id: '270desk', name: 'STE 270 Dedicated Desk Tenant', price: 350, period: '/month', max: 45, existing: 0 },
-            { id: 'small', name: 'Small Office Tenant', price: 1000, period: '/month', max: 12, existing: 8 },
-            { id: 'medium', name: 'Medium Office Tenant', price: 1500, period: '/month', max: 4, existing: 3 },
-            { id: 'suite', name: 'Suite 270 Tenancy', price: 15000, period: '/month', max: 1, existing: 0 }
+        // Base items (orig values) — these do not change and are used to restore state
+        const baseItems = [
+            { id: 'indiv', name: 'Individual Community Member', price: 200, period: '/year', baseMax: 100, baseExisting: 0 },
+            { id: 'nonprofit', name: 'Non-profit Community Member', price: 450, period: '/year', baseMax: 100, baseExisting: 0 },
+            { id: 'forprofit', name: 'For-Profit Community Member', price: 700, period: '/year', baseMax: 100, baseExisting: 0 },
+            { id: 'hotdesk', name: 'Hot Desk Member', price: 100, period: '/month', baseMax: 50, baseExisting: 0 },
+            // desk & 270desk & small & medium & suite based on your latest numbers
+            { id: 'desk', name: 'Dedicated Desk Tenant', price: 350, period: '/month', baseMax: 30, baseExisting: 13 },
+            { id: '270desk', name: 'STE 270 Dedicated Desk Tenant', price: 350, period: '/month', baseMax: 45, baseExisting: 0 },
+            // There are 12 small offices (2 vacancies) outside suite and 2 small inside suite (1 vacancy).
+            // So total small offices = 14, with existing = 11 and available = 3.
+            { id: 'small', name: 'Small Office Tenant', price: 1000, period: '/month', baseMax: 14, baseExisting: 11 },
+            { id: 'medium', name: 'Medium Office Tenant', price: 1500, period: '/month', baseMax: 4, baseExisting: 3 },
+            { id: 'suite', name: 'Suite 270 Tenancy', price: 15000, period: '/month', baseMax: 1, baseExisting: 0 }
         ];
+
+        // Clone into a mutable state array we'll adjust at runtime
+        const items = baseItems.map(it => ({
+            ...it,
+            max: it.baseMax,
+            existing: it.baseExisting
+        }));
+
+        function findItem(id) { return items.find(i => i.id === id); }
 
         const container = document.getElementById('sliders-container');
         const totalsWrapper = document.getElementById('totals-wrapper');
         const totalAnnualDisplay = document.getElementById('total-annual-display');
         const totalMonthlyDisplay = document.getElementById('total-monthly-display');
         const progressBar = document.getElementById('progress-bar');
-        const progressText = document.getElementById('progress-text'); // NEW: Grab the text element
+        const progressText = document.getElementById('progress-text');
 
         // Generate sliders
         items.forEach(item => {
@@ -214,9 +231,9 @@
             group.className = `slider-group ${highlightClass}`;
             group.id = `${item.id}-group`;
 
-            // For the new behavior the slider represents TOTAL occupied (existing + new)
+            // Slider now represents TOTAL occupied (0..max) and starts at existing
             const existing = item.existing || 0;
-            const sliderMax = item.max === 100 ? 100 : item.max; // keep Unlimited sentinel
+            const sliderMax = item.max === 100 ? 100 : item.max; // Unlimited sentinel
 
             group.innerHTML = `
                 ${badgeHTML}
@@ -237,7 +254,22 @@
             document.getElementById(item.id).addEventListener('input', updateTotals);
         });
 
+        // Helper to enable/disable a product block
+        function setDisabled(id, disabled) {
+            const grp = document.getElementById(`${id}-group`);
+            const slider = document.getElementById(id);
+            if (!grp || !slider) return;
+            if (disabled) {
+                grp.classList.add('disabled');
+                slider.disabled = true;
+            } else {
+                grp.classList.remove('disabled');
+                slider.disabled = false;
+            }
+        }
+
         // Calculate and update visuals
+        // Sliders represent TOTAL occupied; newCommitted = totalOccupied - existing
         function updateTotals() {
             let currentAnnualTotal = 0;
             let currentMonthlyTotal = 0;
@@ -249,28 +281,83 @@
                 totals[item.id] = Math.max(0, parseInt(slider.value) || 0);
             });
 
-            // Enforce mutual exclusivity between suite and 270desk:
-            const suiteItem = items.find(i => i.id === 'suite');
-            const d270Item = items.find(i => i.id === '270desk');
-            if (suiteItem && d270Item) {
-                const suiteExisting = suiteItem.existing || 0;
-                const d270Existing = d270Item.existing || 0;
+            // Determine if suite is currently sold (total occupied > its existing)
+            const suite = findItem('suite');
+            const d270 = findItem('270desk');
+            const small = findItem('small');
+            const medium = findItem('medium');
 
-                // If suite has been moved above existing (i.e. someone turned it "on"), clear 270desk new commitments
-                if (totals['suite'] > suiteExisting) {
-                    totals['270desk'] = d270Existing; // set TOTAL occupied back to existing -> new commits = 0
-                    document.getElementById('270desk').value = d270Existing;
+            const suiteSold = totals['suite'] > (suite ? suite.existing : 0);
+            const d270Committed = totals['270desk'] > (d270 ? d270.existing : 0);
+
+            // Reset any dynamic caps/changes to base before re-applying rules so toggling back works
+            items.forEach(it => {
+                it.max = it.baseMax;
+                it.existing = it.baseExisting;
+            });
+
+            // Apply exclusivity rules
+            if (suiteSold) {
+                // When suite is sold: remove two small offices from the small pool (remove both the sold and the vacant inside the suite)
+                // small.baseMax includes those small-in-suite offices; subtract 2 from max and subtract 1 from existing (the one sold inside suite)
+                if (small) {
+                    small.max = Math.max(0, small.baseMax - 2);
+                    small.existing = Math.max(0, small.baseExisting - 1);
                 }
-                // If 270desk has new commitments, clear suite new commitments
-                if (totals['270desk'] > d270Existing) {
-                    totals['suite'] = suiteExisting;
-                    document.getElementById('suite').value = suiteExisting;
+
+                // Reduce medium max by 1 (and available by 1). We keep existing the same so available may drop to zero.
+                if (medium) {
+                    medium.max = Math.max(0, medium.baseMax - 1);
+                    // medium.existing stays the same (so available reduces)
+                    medium.existing = medium.baseExisting;
                 }
+
+                // Disable 270desk entirely
+                if (d270) {
+                    d270.max = 0;
+                }
+
+                // Also enforce that 270desk slider value is set to 0
+                const d270Slider = document.getElementById('270desk');
+                if (d270Slider) {
+                    d270Slider.value = 0;
+                    totals['270desk'] = 0;
+                }
+
+                // Disable 270desk UI
+                setDisabled('270desk', true);
+            } else if (d270Committed) {
+                // If 270desk has any new commitment, disable suite
+                const suiteSlider = document.getElementById('suite');
+                if (suiteSlider) {
+                    suiteSlider.value = suite.baseExisting;
+                    totals['suite'] = suite.baseExisting;
+                }
+                if (suite) suite.max = 0;
+                setDisabled('suite', true);
+            } else {
+                // No exclusivity active — ensure both enabled
+                setDisabled('270desk', false);
+                setDisabled('suite', false);
             }
 
-            // Now apply calculations and update UI using the (possibly adjusted) totals
+            // After modifying max/existing we need to ensure sliders' max attributes reflect current max
             items.forEach(item => {
-                const totalOccupied = totals[item.id];
+                const slider = document.getElementById(item.id);
+                if (!slider) return;
+                const newMax = (item.max === 100 ? 100 : item.max);
+                slider.max = newMax;
+
+                // Clamp slider value to newMax if necessary
+                if (parseInt(slider.value) > newMax) {
+                    slider.value = newMax;
+                    totals[item.id] = newMax;
+                }
+            });
+
+            // Now compute UI and totals using possibly adjusted totals
+            items.forEach(item => {
+                const totalOccupied = totals[item.id] || 0;
                 const existing = item.existing || 0;
                 const newCommitted = Math.max(0, totalOccupied - existing);
 
@@ -308,10 +395,6 @@
                     currentAnnualTotal += baseContribution;
                     currentMonthlyTotal += (baseContribution / 12);
                 }
-
-                // Ensure the actual slider value in DOM matches the totals map (in case we adjusted it above)
-                const sliderEl = document.getElementById(item.id);
-                if (parseInt(sliderEl.value) !== totalOccupied) sliderEl.value = totalOccupied;
             });
 
             totalAnnualDisplay.innerText = currentAnnualTotal.toLocaleString(undefined, { maximumFractionDigits: 0 });
