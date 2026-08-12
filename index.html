@@ -146,6 +146,11 @@
         color: #666;
         margin-bottom: 8px;
     }
+
+    /* Toast container */
+    #toast-container { position: fixed; right: 20px; bottom: 20px; z-index: 9999; }
+    .toast { background: rgba(0,0,0,0.8); color: white; padding: 10px 14px; margin-top: 8px; border-radius: 6px; display:flex; gap:10px; align-items:center; }
+    .toast button { background: transparent; color: #4caf50; border: none; cursor: pointer; font-weight: bold; }
 </style>
 
 <!-- HTML Structure for the Calculator -->
@@ -178,6 +183,9 @@
     <!-- Sliders will be injected here by JavaScript -->
     <div id="sliders-container"></div>
 </div>
+
+<!-- Toast container -->
+<div id="toast-container" aria-live="polite" aria-atomic="true"></div>
 
 <!-- JavaScript Logic -->
 <script>
@@ -216,6 +224,37 @@
         const progressBar = document.getElementById('progress-bar');
         const progressText = document.getElementById('progress-text');
 
+        // Toast helper with undo
+        function showToast(message, {duration = 8000, undoLabel = 'Undo', onUndo = null} = {}) {
+            let container = document.getElementById('toast-container');
+            if (!container) return;
+
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.setAttribute('role', 'status');
+
+            const text = document.createElement('span');
+            text.innerText = message;
+            toast.appendChild(text);
+
+            if (onUndo) {
+                const undoBtn = document.createElement('button');
+                undoBtn.innerText = undoLabel;
+                undoBtn.onclick = () => {
+                    onUndo();
+                    if (container.contains(toast)) container.removeChild(toast);
+                    clearTimeout(timeout);
+                };
+                toast.appendChild(undoBtn);
+            }
+
+            container.appendChild(toast);
+
+            const timeout = setTimeout(() => {
+                if (container.contains(toast)) container.removeChild(toast);
+            }, duration);
+        }
+
         // Generate sliders
         items.forEach(item => {
             const group = document.createElement('div');
@@ -231,7 +270,7 @@
             group.className = `slider-group ${highlightClass}`;
             group.id = `${item.id}-group`;
 
-            // Slider now represents TOTAL occupied (0..max) and starts at existing
+            // Slider now represents TOTAL occupied (existing..max) and starts at existing
             const existing = item.existing || 0;
             const sliderMax = item.max === 100 ? 100 : item.max; // Unlimited sentinel
 
@@ -239,7 +278,7 @@
                 ${badgeHTML}
                 <label for="${item.id}">
                     <span>${item.name} ($${item.price.toLocaleString()}${item.period})</span>
-                    <span id="${item.id}-val">${existing}</span>
+                    <span id="${item.id}-val">${(item.max - existing)} + 0 / ${item.max}</span>
                 </label>
                 <div class="commit-text">
                     Max: <strong id="${item.id}-max">${item.max === 100 ? 'Unlimited' : item.max}</strong> | 
@@ -247,7 +286,7 @@
                     Available: <strong id="${item.id}-avail">${item.max === 100 ? 'Unlimited' : (item.max - existing)}</strong> | 
                     Committed (new): <strong id="${item.id}-commit">0</strong>
                 </div>
-                <input type="range" id="${item.id}" min="0" max="${sliderMax}" value="${existing}">
+                <input type="range" id="${item.id}" min="${existing}" max="${sliderMax}" value="${existing}">
             `;
             container.appendChild(group);
 
@@ -270,6 +309,40 @@
 
         // Calculate and update visuals
         // Sliders represent TOTAL occupied; newCommitted = totalOccupied - existing
+        // We will use a simple snapshot/undo mechanism for toast undo
+        let lastSnapshot = null;
+        function snapshotState() {
+            const sliders = {};
+            items.forEach(it => {
+                const el = document.getElementById(it.id);
+                sliders[it.id] = el ? parseInt(el.value) : it.existing;
+            });
+            return {
+                items: items.map(it => ({ id: it.id, max: it.max, existing: it.existing })),
+                sliders
+            };
+        }
+        function restoreSnapshot(snap) {
+            if (!snap) return;
+            // restore items
+            snap.items.forEach(si => {
+                const it = findItem(si.id);
+                if (it) { it.max = si.max; it.existing = si.existing; }
+            });
+            // restore sliders
+            Object.keys(snap.sliders).forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.max = findItem(id).max === 100 ? 100 : findItem(id).max;
+                    el.min = findItem(id).existing || 0;
+                    el.value = snap.sliders[id];
+                }
+            });
+            // re-enable/disable based on max
+            items.forEach(it => setDisabled(it.id, it.max === 0));
+            updateTotals();
+        }
+
         function updateTotals() {
             let currentAnnualTotal = 0;
             let currentMonthlyTotal = 0;
@@ -278,7 +351,7 @@
             const totals = {};
             items.forEach(item => {
                 const slider = document.getElementById(item.id);
-                totals[item.id] = Math.max(0, parseInt(slider.value) || 0);
+                totals[item.id] = Math.max( (item.existing || 0), parseInt(slider.value) || 0);
             });
 
             // Determine if suite is currently sold (total occupied > its existing)
@@ -296,19 +369,27 @@
                 it.existing = it.baseExisting;
             });
 
+            // We'll snapshot state right before we apply an exclusivity-induced change so toast undo can restore it
+            let willApplySuiteRules = false;
+            let willApplyD270Rules = false;
+            if (suiteSold) willApplySuiteRules = true;
+            else if (d270Committed) willApplyD270Rules = true;
+
+            if (willApplySuiteRules || willApplyD270Rules) {
+                lastSnapshot = snapshotState();
+            }
+
             // Apply exclusivity rules
             if (suiteSold) {
                 // When suite is sold: remove two small offices from the small pool (remove both the sold and the vacant inside the suite)
-                // small.baseMax includes those small-in-suite offices; subtract 2 from max and subtract 1 from existing (the one sold inside suite)
                 if (small) {
                     small.max = Math.max(0, small.baseMax - 2);
                     small.existing = Math.max(0, small.baseExisting - 1);
                 }
 
-                // Reduce medium max by 1 (and available by 1). We keep existing the same so available may drop to zero.
+                // Reduce medium max by 1
                 if (medium) {
                     medium.max = Math.max(0, medium.baseMax - 1);
-                    // medium.existing stays the same (so available reduces)
                     medium.existing = medium.baseExisting;
                 }
 
@@ -317,7 +398,7 @@
                     d270.max = 0;
                 }
 
-                // Also enforce that 270desk slider value is set to 0
+                // Enforce that 270desk slider value is set to 0
                 const d270Slider = document.getElementById('270desk');
                 if (d270Slider) {
                     d270Slider.value = 0;
@@ -326,6 +407,10 @@
 
                 // Disable 270desk UI
                 setDisabled('270desk', true);
+
+                // Show toast with undo
+                showToast('Suite sold — 270desk disabled. ', { onUndo: () => restoreSnapshot(lastSnapshot) });
+
             } else if (d270Committed) {
                 // If 270desk has any new commitment, disable suite
                 const suiteSlider = document.getElementById('suite');
@@ -335,23 +420,31 @@
                 }
                 if (suite) suite.max = 0;
                 setDisabled('suite', true);
+
+                showToast('270desk committed — suite disabled. ', { onUndo: () => restoreSnapshot(lastSnapshot) });
             } else {
                 // No exclusivity active — ensure both enabled
                 setDisabled('270desk', false);
                 setDisabled('suite', false);
             }
 
-            // After modifying max/existing we need to ensure sliders' max attributes reflect current max
+            // After modifying max/existing we need to ensure sliders' max/min attributes reflect current max/existing
             items.forEach(item => {
                 const slider = document.getElementById(item.id);
                 if (!slider) return;
                 const newMax = (item.max === 100 ? 100 : item.max);
                 slider.max = newMax;
+                slider.min = item.existing || 0;
 
                 // Clamp slider value to newMax if necessary
                 if (parseInt(slider.value) > newMax) {
                     slider.value = newMax;
                     totals[item.id] = newMax;
+                }
+                // Ensure it cannot go below existing
+                if (parseInt(slider.value) < (item.existing || 0)) {
+                    slider.value = item.existing || 0;
+                    totals[item.id] = item.existing || 0;
                 }
             });
 
@@ -361,16 +454,21 @@
                 const existing = item.existing || 0;
                 const newCommitted = Math.max(0, totalOccupied - existing);
 
-                // Update displayed slider total value
-                document.getElementById(`${item.id}-val`).innerText = totalOccupied;
+                // Available after = max - totalOccupied
+                const availableAfter = (item.max === 100) ? 'Unlimited' : Math.max(0, item.max - totalOccupied);
+
+                // Update displayed slider count to show "Available + Committed / Max"
+                const valEl = document.getElementById(`${item.id}-val`);
+                if (valEl) {
+                    valEl.innerText = `${availableAfter} + ${newCommitted} / ${item.max === 100 ? 'Unlimited' : item.max}`;
+                }
 
                 // Update displayed numbers
                 if (item.max === 100) {
                     document.getElementById(`${item.id}-avail`).innerText = 'Unlimited';
                     document.getElementById(`${item.id}-max`).innerText = 'Unlimited';
                 } else {
-                    const availableAfter = item.max - totalOccupied;
-                    document.getElementById(`${item.id}-avail`).innerText = availableAfter >= 0 ? availableAfter : 0;
+                    document.getElementById(`${item.id}-avail`).innerText = availableAfter;
                     document.getElementById(`${item.id}-max`).innerText = item.max;
                 }
 
