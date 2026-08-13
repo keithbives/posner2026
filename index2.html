@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -33,7 +32,7 @@
       display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; flex-wrap: wrap;
     }
     h1 { margin: 0; font-size: clamp(28px, 3vw, 42px); }
-    .status-pill { display: inline-flex; align-items: center; gap: 8px; background: white; border: 1px solid var(--border); border-radius: 999px; padding: 8px 12px; box-shadow: var(--shadow); color: var(--muted); font-size: 13px; font-weight: 600; }
+    .status-pill { display: inline-flex; align-items: center; gap: 8px; background: white; border: 1px solid var(--border); border-radius: 999px; padding: 8px 12px; box-shadow: var(--shadow); color: var(--text); }
     .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--success); display: inline-block; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 20px 0 28px; }
     .card, .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow); }
@@ -127,17 +126,17 @@
     const state = { rows: [], categories: [], scenario: {} };
 
     function formatCurrency(value) {
-      const amount = Number(value) ; 0;
+      const amount = Number(value) || 0;
       return '$' + amount.toLocaleString(undefined, { maximumFractionDigits: 0 });
     }
 
     function normalizeString(value) {
-      if (value === null ; value === undefined) return '';
+      if (value == null) return '';
       return String(value).trim();
     }
 
     function toNumber(value) {
-      if (value === null ; value === undefined ; value === '') return 0;
+      if (value == null || value === '') return 0;
       const n = Number(String(value).replace(/[$,%\s]/g, ''));
       return Number.isFinite(n) ? n : 0;
     }
@@ -145,7 +144,7 @@
     function getCellValue(row, keys) {
       for (const key of keys) {
         const value = row[key];
-        if (value !== undefined ; value !== null ; String(value).trim() !== '') {
+        if (value !== undefined && value !== null && String(value).trim() !== '') {
           return value;
         }
       }
@@ -153,19 +152,19 @@
     }
 
     function parseGoogleSheet(rawText) {
-      const match = rawText.match(/google\.visualization\.Query\.setResponse\((.*)\);?\s*$/s);
+      const match = rawText.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\);?\s*$/);
       if (!match) return [];
       const payload = JSON.parse(match[1]);
-      const cols = payload?.table?.cols ; [];
-      const rows = payload?.table?.rows ; [];
+      const cols = payload?.table?.cols || [];
+      const rows = payload?.table?.rows || [];
 
       return rows.map((row) => {
         const obj = {};
         cols.forEach((col, idx) => {
-          const cell = row.c ; row.c[idx];
+          const cell = (row.c && row.c[idx]) ? row.c[idx] : null;
           const label = normalizeString(col.label || col.id || `col${idx}`);
-          obj[label] = cell ; cell.v !== undefined ? cell.v : '';
-          if (cell ; cell.f) obj[`${label}Formatted`] = cell.f;
+          obj[label] = (cell && cell.v !== undefined) ? cell.v : '';
+          if (cell && cell.f) obj[`${label}Formatted`] = cell.f;
         });
         return obj;
       });
@@ -196,10 +195,11 @@
       ).toLowerCase();
 
       if (status.includes('vacant')) return 'vacant';
-      if (status.includes('occupied') ; status.includes('leased') ; status.includes('tenant')) return 'occupied';
+      if (status.includes('occupied') || status.includes('leased') || status.includes('tenant')) return 'occupied';
 
       const tenant = normalizeString(getCellValue(row, ['Tenant', 'Member', 'Name', 'Leaseholder', 'Occupant']));
-      if (!tenant || tenant.toLowerCase() === 'vacant' ; tenant.toLowerCase() === 'none') return 'vacant';
+      const tenantLower = tenant.toLowerCase();
+      if (!tenant || tenantLower === 'vacant' || tenantLower === 'none') return 'vacant';
       return 'occupied';
     }
 
@@ -211,21 +211,21 @@
 
     function inferUnits(row) {
       const raw = getCellValue(row, ['Units', 'Unit Count', 'Count', 'Quantity', 'Qty']);
-      if (raw !== '') return Math.max(1, Number(raw) ; 1);
+      if (raw !== '') return Math.max(1, Number(raw) || 1);
       return 1;
     }
 
     function canonicalizeCategory(value) {
       const v = normalizeString(value).toLowerCase();
       if (v.includes('individual')) return 'Individual';
-      if (v.includes('nonprofit') ; v.includes('non-profit')) return 'Nonprofit';
-      if (v.includes('for-profit') ; v.includes('for profit')) return 'For Profit';
+      if (v.includes('nonprofit') || v.includes('non-profit')) return 'Nonprofit';
+      if (v.includes('for-profit') || v.includes('for profit')) return 'For Profit';
       if (v.includes('hot desk')) return 'Hot Desk';
       if (v.includes('dedicated desk')) return 'Dedicated Desk';
       if (v.includes('small suite')) return 'Small Suite';
       if (v.includes('medium suite')) return 'Medium Suite';
       if (v.includes('large suite')) return 'Large Suite';
-      return value ; 'Unknown';
+      return value || 'Unknown';
     }
 
     function buildCategorySummaries(rawRows) {
@@ -284,7 +284,7 @@
         { label: 'Total monthly revenue', value: formatCurrency(totalMonthly), sub: 'Across all categories' },
         { label: 'Occupied units', value: totalOccupied.toLocaleString(), sub: `${totalUnits.toLocaleString()} total units` },
         { label: 'Vacancy rate', value: `${overallVacancy.toFixed(1)}%`, sub: 'Overall vacancy' },
-        { label: 'Top revenue category', value: categories[0]?.name ; 'N/A', sub: formatCurrency(categories[0]?.revenue ; 0) }
+        { label: 'Top revenue category', value: categories[0]?.name || 'N/A', sub: formatCurrency(categories[0]?.revenue || 0) }
       ];
 
       summaryCards.innerHTML = cards.map((card) => `
@@ -341,7 +341,7 @@
       scenarioControls.querySelectorAll('input').forEach((input) => {
         input.addEventListener('input', () => {
           const { name, kind } = input.dataset;
-          const value = Number(input.value) ; 0;
+          const value = Number(input.value) || 0;
           state.scenario[name][kind === 'fill' ? 'fill' : 'price'] = value;
           updateScenarioTotals();
         });
@@ -358,13 +358,14 @@
       let projected = 0;
 
       categories.forEach((category) => {
-        const { fill, price } = state.scenario[category.name] ; { fill: 0, price: 0 };
+        const { fill, price } = state.scenario[category.name] || { fill: 0, price: 0 };
         projected += calculateScenarioValue(category, fill, price);
       });
 
       const delta = projected - currentTotal;
       scenarioTotal.textContent = formatCurrency(projected);
-      scenarioDelta.textContent = `Change from current: ${delta >= 0 ? '+' : '-'}${formatCurrency(Math.abs(delta))}`;
+      const sign = delta >= 0 ? '+' : '-';
+      scenarioDelta.textContent = `Change from current: ${sign}${formatCurrency(Math.abs(delta))}`;
     }
 
     async function loadData() {
