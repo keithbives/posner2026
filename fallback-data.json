@@ -1,0 +1,10 @@
+[
+  { "Category": "Individual", "Tenant": "Member A", "Actual Rate": 200, "Occupancy": "Occupied", "Units": 1 },
+  { "Category": "Nonprofit", "Tenant": "Member B", "Actual Rate": 450, "Occupancy": "Occupied", "Units": 1 },
+  { "Category": "For Profit", "Tenant": "Member C", "Actual Rate": 700, "Occupancy": "Occupied", "Units": 1 },
+  { "Category": "Hot Desk", "Tenant": "Hot Desk A", "Actual Rate": 100, "Occupancy": "Occupied", "Units": 1 },
+  { "Category": "Dedicated Desk", "Tenant": "Vacant", "Actual Rate": 350, "Occupancy": "Vacant", "Units": 1 },
+  { "Category": "Small Suite", "Tenant": "Vacant", "Actual Rate": 1000, "Occupancy": "Vacant", "Units": 1 },
+  { "Category": "Medium Suite", "Tenant": "Vacant", "Actual Rate": 1500, "Occupancy": "Vacant", "Units": 1 },
+  { "Category": "Large Suite", "Tenant": "Vacant", "Actual Rate": 5000, "Occupancy": "Vacant", "Units": 1 }
+]
