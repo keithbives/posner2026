@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Validate dashboard script syntax",
+			"type": "shell",
+			"command": "node -e \"const fs=require('fs'); const html=fs.readFileSync('index2.html','utf8'); const script=html.match(/<script>([\\s\\S]*)<\\/script>/)?.[1]; if(!script){throw new Error('No script tag found');} new Function(script); console.log('Script syntax OK');\"",
+			"args": [],
+			"isBackground": false,
+			"problemMatcher": [],
+			"group": "build"
+		}
+	]
+}
